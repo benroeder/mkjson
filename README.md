@@ -3,6 +3,17 @@
 
 `mkjson` is a simple and flexible single-function C library intended to make building  JSON strings in C easier. Making use of variable length argument lists, it allows you to create complex JSON objects in just one line.
 
+## Fork Information
+
+This is a fork of [mkjson](https://github.com/Jacajack/mkjson) maintained for use in [uhubctl](https://github.com/mvp/uhubctl). The original repository was archived on April 19, 2025.
+
+### Changes from Original
+1. **Fixed 64-bit integer format specifier** - Changed `%Ld` to `%lld` to prevent truncation of large values
+2. **Fixed include directive** - Changed `#include <mkjson.h>` to `#include "mkjson.h"` for proper local header inclusion
+3. **Added comprehensive string escaping** - Fixed critical JSON injection vulnerabilities by properly escaping strings and object keys
+
+This fork provides a lightweight JSON generation library for uhubctl with a 10x size reduction compared to cJSON.
+
 ## Example
 ```cpp
 char *json = mkjson( MKJSON_OBJ, 3,
