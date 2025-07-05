@@ -54,6 +54,76 @@ static int allsprintf( char **strp, const char *fmt, ... )
 	return len;
 }
 
+// Calculate the escaped length of a string (excluding null terminator)
+static size_t json_escaped_len(const char *str)
+{
+	size_t len = 0;
+	
+	if (!str) return 4; // "null"
+	
+	for (const char *p = str; *p; p++) {
+		switch (*p) {
+			case '"':
+			case '\\':
+			case '\b':
+			case '\f':
+			case '\n':
+			case '\r':
+			case '\t':
+				len += 2; // Escaped char: \X
+				break;
+			default:
+				if ((unsigned char)*p < 0x20) {
+					len += 6; // Unicode escape: \uXXXX
+				} else {
+					len += 1; // Regular char
+				}
+				break;
+		}
+	}
+	
+	return len;
+}
+
+// Escape a string for JSON. Caller must free the returned string
+static char *json_escape_string(const char *str)
+{
+	if (!str) {
+		char *null_str = malloc(5);
+		if (null_str) strcpy(null_str, "null");
+		return null_str;
+	}
+	
+	size_t escaped_len = json_escaped_len(str);
+	char *escaped = malloc(escaped_len + 1);
+	if (!escaped) return NULL;
+	
+	char *dst = escaped;
+	for (const char *p = str; *p; p++) {
+		switch (*p) {
+			case '"':  *dst++ = '\\'; *dst++ = '"'; break;
+			case '\\': *dst++ = '\\'; *dst++ = '\\'; break;
+			case '\b': *dst++ = '\\'; *dst++ = 'b'; break;
+			case '\f': *dst++ = '\\'; *dst++ = 'f'; break;
+			case '\n': *dst++ = '\\'; *dst++ = 'n'; break;
+			case '\r': *dst++ = '\\'; *dst++ = 'r'; break;
+			case '\t': *dst++ = '\\'; *dst++ = 't'; break;
+			default:
+				if ((unsigned char)*p < 0x20) {
+					// Control characters: use \uXXXX
+					sprintf(dst, "\\u%04x", (unsigned char)*p);
+					dst += 6;
+				} else {
+					*dst++ = *p;
+				}
+				break;
+		}
+	}
+	*dst = '\0';
+	
+	return escaped;
+}
+
 // Return JSON string built from va_arg arguments
 // If no longer needed, should be passed to free() by user
 char *mkjson( enum mkjson_container_type otype, int count, ... )
@@ -100,13 +170,31 @@ char *mkjson( enum mkjson_container_type otype, int count, ... )
 		else key = "";
 
 		// Generate prefix
-		if ( allsprintf( &prefix, "%s%s%s",
-			otype == MKJSON_OBJ ? "\"" : "",            // Quote before key
-			key,                                        // Key
-			otype == MKJSON_OBJ ? "\": " : "" ) == -1 ) // Quote and colon after key
+		if ( otype == MKJSON_OBJ )
 		{
-			failure = 1;
-			break;
+			// Escape the key for object mode
+			char *escaped_key = json_escape_string( key );
+			if ( !escaped_key )
+			{
+				failure = 1;
+				break;
+			}
+			int ret = allsprintf( &prefix, "\"%s\": ", escaped_key );
+			free( escaped_key );
+			if ( ret == -1 )
+			{
+				failure = 1;
+				break;
+			}
+		}
+		else
+		{
+			// Array mode - no prefix needed
+			if ( allsprintf( &prefix, "" ) == -1 )
+			{
+				failure = 1;
+				break;
+			}
 		}
 
 		// Depending on value type
@@ -171,8 +259,17 @@ char *mkjson( enum mkjson_container_type otype, int count, ... )
 				}
 				else
 				{
-					if ( allsprintf( chunks + i, "%s\"%s\"", prefix, strval ) == -1 )
+					char *escaped = json_escape_string( strval );
+					if ( escaped )
+					{
+						if ( allsprintf( chunks + i, "%s\"%s\"", prefix, escaped ) == -1 )
+							chunks[i] = NULL;
+						free( escaped );
+					}
+					else
+					{
 						chunks[i] = NULL;
+					}
 				}
 
 				// Optional free
